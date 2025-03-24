@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isPandit() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'pandit';
+    }
+    
+    function isDevotee() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'user';
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if request.auth != null;
+      allow update: if isOwner(userId);
+      allow delete: if false;
+    }
+
+    // Bookings collection
+    match /bookings/{bookingId} {
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated() && 
+        (isDevotee() || isPandit());
+      
+      allow update: if isAuthenticated() &&
+        (
+          (resource.data.panditId == request.auth.uid) ||
+          (resource.data.devoteeId == request.auth.uid)
+        ) && 
+        (!request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['id', 'createdAt', 'panditId', 'devoteeId']));
+    }
+
+    // Reviews collection
+    match /reviews/{reviewId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isDevotee();
+      allow update, delete: if isOwner(request.auth.uid);
+    }
+
+    // Messages collection
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() &&
+        (
+          resource.data.senderId == request.auth.uid ||
+          resource.data.recipientId == request.auth.uid
+        );
+      allow create: if isAuthenticated();
+    }
+  }
+}
